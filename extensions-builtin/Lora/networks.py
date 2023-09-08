@@ -404,7 +404,7 @@ def save_lora_file(file: UploadFile):
     # if file exists 
     if os.path.exists(file_path):
         filename = increment_filename(file_path)
-        file_path = os.path.join(LORA_DIR, filename)
+        file_path = os.path.join(lora_dir, filename)
     
     with open(file_path, "wb") as f:
         f.write(file.file.read())
