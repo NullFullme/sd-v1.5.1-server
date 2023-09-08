@@ -18,7 +18,7 @@ __pycache__
 /config.json
 /log
 /webui.settings.bat
-/embeddings
+
 /styles.csv
 /params.txt
 /styles.csv.bak
@@ -31,7 +31,7 @@ notification.mp3
 /SwinIR
 /textual_inversion
 .vscode
-/extensions
+
 /test/stdout.txt
 /test/stderr.txt
 /cache.json*
