@@ -15,7 +15,7 @@ from fastapi.encoders import jsonable_encoder
 from secrets import compare_digest
 
 import modules.shared as shared
-from modules import sd_samplers, deepbooru, sd_hijack, images, scripts, ui, postprocessing, errors, restart
+from modules import sd_samplers, deepbooru, sd_hijack, images, scripts, ui, postprocessing, errors, restart, progress
 from modules.api import models
 from modules.shared import opts
 from modules.processing import StableDiffusionProcessingTxt2Img, StableDiffusionProcessingImg2Img, process_images
@@ -179,7 +179,8 @@ class Api:
         self.add_api_route("/sdapi/v1/extra-single-image", self.extras_single_image_api, methods=["POST"], response_model=models.ExtrasSingleImageResponse)
         self.add_api_route("/sdapi/v1/extra-batch-images", self.extras_batch_images_api, methods=["POST"], response_model=models.ExtrasBatchImagesResponse)
         self.add_api_route("/sdapi/v1/png-info", self.pnginfoapi, methods=["POST"], response_model=models.PNGInfoResponse)
-        self.add_api_route("/sdapi/v1/progress", self.progressapi, methods=["GET"], response_model=models.ProgressResponse)
+        # Get change to Post
+        self.add_api_route("/sdapi/v1/progress", self.progressapi, methods=["POST"], response_model=models.ProgressResponse)
         self.add_api_route("/sdapi/v1/interrogate", self.interrogateapi, methods=["POST"])
         self.add_api_route("/sdapi/v1/interrupt", self.interruptapi, methods=["POST"])
         self.add_api_route("/sdapi/v1/skip", self.skip, methods=["POST"])
@@ -300,7 +301,13 @@ class Api:
                         script_args[alwayson_script.args_from + idx] = request.alwayson_scripts[alwayson_script_name]["args"][idx]
         return script_args
 
+    ### chnage text2imgapi logic
     def text2imgapi(self, txt2imgreq: models.StableDiffusionTxt2ImgProcessingAPI):
+        ### add progress
+        id_task = txt2imgreq.id_task   #获取id_task
+        sd_model_checkpoint = txt2imgreq.sd_model_checkpoint   # 获取模型名称
+        progress.add_task_to_queue(id_task)   #添加id_task到任务列队
+        ###
         script_runner = scripts.scripts_txt2img
         if not script_runner.scripts:
             script_runner.initialize_scripts(False)
@@ -328,6 +335,14 @@ class Api:
         args.pop('save_images', None)
 
         with self.queue_lock:
+            ### add id_task and reload model
+            shared.state.begin()
+            progress.start_task(id_task) # 开始记录id       
+            print("---------------------------更换模型",sd_model_checkpoint)
+            shared.opts.sd_model_checkpoint = sd_model_checkpoint
+            reload_model_weights(shared.sd_model)
+            print("-----------------模型切换完成")
+            ###
             with closing(StableDiffusionProcessingTxt2Img(sd_model=shared.sd_model, **args)) as p:
                 p.scripts = script_runner
                 p.outpath_grids = opts.outdir_txt2img_grids
@@ -343,12 +358,23 @@ class Api:
                         processed = process_images(p)
                 finally:
                     shared.state.end()
-
+        
+        ### progress finish
+        progress.record_results(id_task,processed)
+        progress.finish_task(id_task)
+        shared.state.end()
+        ###
         b64images = list(map(encode_pil_to_base64, processed.images)) if send_images else []
 
         return models.TextToImageResponse(images=b64images, parameters=vars(txt2imgreq), info=processed.js())
 
+    ### change img2imgapi logic
     def img2imgapi(self, img2imgreq: models.StableDiffusionImg2ImgProcessingAPI):
+        ### add progress
+        id_task = img2imgreq.id_task   #获取id_task
+        sd_model_checkpoint = img2imgreq.sd_model_checkpoint   # 获取模型名称        
+        progress.add_task_to_queue(id_task)   #添加id_task到任务列队
+        ###
         init_images = img2imgreq.init_images
         if init_images is None:
             raise HTTPException(status_code=404, detail="Init image not found")
@@ -386,6 +412,14 @@ class Api:
         args.pop('save_images', None)
 
         with self.queue_lock:
+            ### add id_task and reload model
+            shared.state.begin()
+            progress.start_task(id_task) # 开始记录id
+            print("---------------------------更换模型",sd_model_checkpoint)
+            shared.opts.sd_model_checkpoint = sd_model_checkpoint
+            reload_model_weights(shared.sd_model)
+            print("-----------------模型切换完成")
+            ### 
             with closing(StableDiffusionProcessingImg2Img(sd_model=shared.sd_model, **args)) as p:
                 p.init_images = [decode_base64_to_image(x) for x in init_images]
                 p.scripts = script_runner
@@ -402,6 +436,11 @@ class Api:
                         processed = process_images(p)
                 finally:
                     shared.state.end()
+        ### progress finish
+        progress.record_results(id_task,processed)
+        progress.finish_task(id_task)
+        shared.state.end()
+        ###
 
         b64images = list(map(encode_pil_to_base64, processed.images)) if send_images else []
 
@@ -448,33 +487,39 @@ class Api:
 
         return models.PNGInfoResponse(info=geninfo, items=items)
 
-    def progressapi(self, req: models.ProgressRequest = Depends()):
+    ### change progressapi logic
+    # def progressapi(self, req: models.ProgressRequest = Depends()):
+    def progressapi(self, req: models.ProgressRequest):
+        from modules.progress import progressapi as progress
+        info = progress(req)
+        return info
         # copy from check_progress_call of ui.py
 
-        if shared.state.job_count == 0:
-            return models.ProgressResponse(progress=0, eta_relative=0, state=shared.state.dict(), textinfo=shared.state.textinfo)
+        # if shared.state.job_count == 0:
+        #     return models.ProgressResponse(progress=0, eta_relative=0, state=shared.state.dict(), textinfo=shared.state.textinfo)
 
-        # avoid dividing zero
-        progress = 0.01
+        # # avoid dividing zero
+        # progress = 0.01
 
-        if shared.state.job_count > 0:
-            progress += shared.state.job_no / shared.state.job_count
-        if shared.state.sampling_steps > 0:
-            progress += 1 / shared.state.job_count * shared.state.sampling_step / shared.state.sampling_steps
+        # if shared.state.job_count > 0:
+        #     progress += shared.state.job_no / shared.state.job_count
+        # if shared.state.sampling_steps > 0:
+        #     progress += 1 / shared.state.job_count * shared.state.sampling_step / shared.state.sampling_steps
 
-        time_since_start = time.time() - shared.state.time_start
-        eta = (time_since_start/progress)
-        eta_relative = eta-time_since_start
+        # time_since_start = time.time() - shared.state.time_start
+        # eta = (time_since_start/progress)
+        # eta_relative = eta-time_since_start
 
-        progress = min(progress, 1)
+        # progress = min(progress, 1)
 
-        shared.state.set_current_image()
+        # shared.state.set_current_image()
 
-        current_image = None
-        if shared.state.current_image and not req.skip_current_image:
-            current_image = encode_pil_to_base64(shared.state.current_image)
+        # current_image = None
+        # if shared.state.current_image and not req.skip_current_image:
+        #     current_image = encode_pil_to_base64(shared.state.current_image)
 
-        return models.ProgressResponse(progress=progress, eta_relative=eta_relative, state=shared.state.dict(), current_image=current_image, textinfo=shared.state.textinfo)
+        # return models.ProgressResponse(progress=progress, eta_relative=eta_relative, state=shared.state.dict(), current_image=current_image, textinfo=shared.state.textinfo)
+    ###
 
     def interrogateapi(self, interrogatereq: models.InterrogateRequest):
         image_b64 = interrogatereq.image
