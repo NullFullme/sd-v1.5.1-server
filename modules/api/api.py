@@ -10,7 +10,7 @@ from io import BytesIO
 from fastapi import APIRouter, Depends, FastAPI, Request, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.exceptions import HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
 from fastapi.encoders import jsonable_encoder
 from secrets import compare_digest
 
