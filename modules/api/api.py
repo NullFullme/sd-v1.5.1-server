@@ -174,6 +174,12 @@ class Api:
         self.app = app
         self.queue_lock = queue_lock
         api_middleware(self.app)
+        from fastapi.staticfiles import StaticFiles
+        from starlette.templating import Jinja2Templates
+        app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(os.path.realpath(__file__)), "static")), name="static")
+        self.home_templates = Jinja2Templates(directory=os.path.join(os.path.dirname(os.path.realpath(__file__)), "static"))
+        self.add_api_route("/", self.get_config, methods=["GET"], response_model=models.OptionsModel)
+
         self.add_api_route("/sdapi/v1/txt2img", self.text2imgapi, methods=["POST"], response_model=models.TextToImageResponse)
         self.add_api_route("/sdapi/v1/img2img", self.img2imgapi, methods=["POST"], response_model=models.ImageToImageResponse)
         self.add_api_route("/sdapi/v1/extra-single-image", self.extras_single_image_api, methods=["POST"], response_model=models.ExtrasSingleImageResponse)
@@ -216,6 +222,10 @@ class Api:
 
         self.default_script_arg_txt2img = []
         self.default_script_arg_img2img = []
+
+    async def home(request: Request):
+        context = {'request': request}
+        return self.home_templates.TemplateResponse("index.html",context=context)
 
     def add_api_route(self, path: str, endpoint, **kwargs):
         if shared.cmd_opts.api_auth:
