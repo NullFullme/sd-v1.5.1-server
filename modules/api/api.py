@@ -174,11 +174,17 @@ class Api:
         self.app = app
         self.queue_lock = queue_lock
         api_middleware(self.app)
+
         from fastapi.staticfiles import StaticFiles
         from starlette.templating import Jinja2Templates
-        app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(os.path.realpath(__file__)), "static")), name="static")
-        self.home_templates = Jinja2Templates(directory=os.path.join(os.path.dirname(os.path.realpath(__file__)), "static"))
-        self.add_api_route("/", self.get_config, methods=["GET"], response_model=models.OptionsModel)
+        from pathlib import Path
+        # 项目根目录
+        base_dir = Path(__file__).absolute().parent.parent.parent
+        print("------------base_dir:",base_dir)
+        static_dir = base_dir / 'static'
+        app.mount("/static", StaticFiles(directory=static_dir.as_posix()), name="static")
+        self.home_templates = Jinja2Templates(directory=static_dir.as_posix())
+        self.add_api_route("/", self.home, methods=["GET"], response_class=HTMLResponse)
 
         self.add_api_route("/sdapi/v1/txt2img", self.text2imgapi, methods=["POST"], response_model=models.TextToImageResponse)
         self.add_api_route("/sdapi/v1/img2img", self.img2imgapi, methods=["POST"], response_model=models.ImageToImageResponse)
@@ -223,7 +229,7 @@ class Api:
         self.default_script_arg_txt2img = []
         self.default_script_arg_img2img = []
 
-    async def home(request: Request):
+    async def home(self, request: Request):
         context = {'request': request}
         return self.home_templates.TemplateResponse("index.html",context=context)
 
